@@ -1,11 +1,11 @@
 {
   "name": "magic-lantern",
   "version": "0.1.0",
-  "description": "Lets Claude project short narrated slideshows in a pane beside the conversation: frames shown in order, a voice speaking over each, some of them moving.",
+  "description": "Lets Claude walk you through things out loud, with pictures and animations in a pane beside the conversation: what changed, how something flows, why something happened.",
   "author": {
     "name": "Nicolò Pignatelli",
     "url": "https://github.com/nicolopignatelli"
   },
   "license": "MIT",
-  "keywords": ["narration", "slideshow", "animation", "voice", "pane", "terminal", "kitty", "ghostty"]
+  "keywords": ["narration", "walkthrough", "animation", "voice", "pane", "terminal", "kitty", "ghostty"]
 }

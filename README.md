@@ -1,9 +1,9 @@
 # magic-lantern
 
-A mod for [Claude Code](https://claude.com/claude-code) that lets Claude **project short
-narrated slideshows** in a pane beside the conversation. A few frames come up in order, a
-voice speaks over each one, and some of them move. You watch and listen at the same time:
-the voice carries the sentences, so the screen holds only what has to be seen.
+A mod for [Claude Code](https://claude.com/claude-code) that lets Claude **walk you through
+things out loud, with pictures and animations** in a pane beside the conversation: what
+changed, how something flows, why something happened. You watch and listen at the same
+time: the voice carries the sentences, so the screen holds only what has to be seen.
 
 Named after the magic lantern, the projector of painted slides shown in the dark while a
 narrator told the story, some slides with moving parts.

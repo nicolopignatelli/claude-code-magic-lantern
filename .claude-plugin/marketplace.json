@@ -5,13 +5,13 @@
     "url": "https://github.com/nicolopignatelli"
   },
   "metadata": {
-    "description": "The magic-lantern mod for Claude Code: Claude projects short narrated slideshows in a pane beside the conversation."
+    "description": "The magic-lantern mod for Claude Code: Claude walks you through things out loud, with pictures and animations in a pane beside the conversation."
   },
   "plugins": [
     {
       "name": "magic-lantern",
       "source": "./",
-      "description": "Lets Claude project short narrated slideshows in a pane beside the conversation: frames shown in order, a voice speaking over each, some of them moving."
+      "description": "Lets Claude walk you through things out loud, with pictures and animations in a pane beside the conversation: what changed, how something flows, why something happened."
     }
   ]
 }
