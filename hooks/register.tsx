@@ -312,17 +312,26 @@ const rewind = (current: Playback) => {
   current.isEnded = false
 }
 
-export const register: Register = on => {
-  on('session.start', async ($, e, next) => {
-    await $.tool.register({ name: 'project', description: DESCRIPTION, inputSchema: INPUT_SCHEMA, isDeferred: false })
-    await $.command.register({ name: 'magic-lantern', description: 'Open the magic lantern pane and project what is waiting in it' })
-    // One clock for the session: a tick does nothing unless slides
-    // plays, and moves it on once the line and the clip have ended and the
-    // pause has run.
-    $.clock.every(TICK_MS, async () => {
+// The clock that moves playback on: a tick does nothing unless slides play, and
+// advances them once the line and the clip have ended and the pause has run. A reload
+// of the plugins can stop it without the mod's start running again, so every place
+// that starts or resumes a projection makes sure one is ticking; a clock that finds a
+// newer one started stops itself.
+let clockId = 0
+let lastTickAt = 0
+const ensureClock = async ($: EngineInterface) => {
+  if ((await $.clock.now()) - lastTickAt < TICK_MS * 5) return
+  const id = ++clockId
+  lastTickAt = await $.clock.now()
+  const clock = $.clock.every(TICK_MS, async () => {
+    if (id !== clockId) {
+      clock.cancel()
+      return
+    }
+      const now = await $.clock.now()
+      lastTickAt = now
       const current = playback
       if (!current || current.isAwaitingOpen || current.isEnded) return
-      const now = await $.clock.now()
       if (playback !== current) return
       const playing = current.frames[current.index]
       if (playing) {
@@ -400,7 +409,14 @@ export const register: Register = on => {
           }
         })
       })
-    })
+  })
+}
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    await $.tool.register({ name: 'project', description: DESCRIPTION, inputSchema: INPUT_SCHEMA, isDeferred: false })
+    await $.command.register({ name: 'magic-lantern', description: 'Open the magic lantern pane and project what is waiting in it' })
+    await ensureClock($)
     return next(e)
   })
 
@@ -485,6 +501,7 @@ export const register: Register = on => {
     }
     // A pane opened from a tool call is one nobody asked for, which a narrow terminal
     // leaves undrawn; the slides then wait for the person's /magic-lantern.
+    await ensureClock($)
     const opened = await $.ui.open({ id: PANE, title: input.title })
     if (!opened.isPlaced) {
       playback.isAwaitingOpen = true
@@ -508,6 +525,7 @@ export const register: Register = on => {
     const opened = await $.ui.open({ id: PANE, title: playback.title })
     if (!opened.isPlaced) return { text: `The magic lantern pane could not open: ${opened.reason}` }
     playback.isAwaitingOpen = false
+    await ensureClock($)
     return { text: 'Projecting.' }
   })
 
@@ -598,6 +616,7 @@ export const register: Register = on => {
                 if (playback !== current) return
                 rewind(current)
                 $.ui.invalidate('ui.render')
+                void ensureClock($)
               }}
             >
               Replay
