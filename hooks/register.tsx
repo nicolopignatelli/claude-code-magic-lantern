@@ -25,14 +25,18 @@ const RENDER_CONCURRENCY = 4
 const CELL_ASPECT = 2
 // The pane's layout: the picture centred with this many columns free on each side, and
 // under it, rows for a blank, the spoken line (up to three rows), a blank, the progress
-// segments, a blank and the end card's buttons.
+// segments, a blank, the frame-jump buttons and the end card's buttons.
 const PICTURE_MARGIN_COLUMNS = 2
-const ROWS_UNDER_PICTURE = 9
+const ROWS_UNDER_PICTURE = 12
 // One progress segment per frame, at most this many cells long; a single frame gets one
 // longer bar, which reads as the clip's own progress.
 const SEGMENT_MAX_CELLS = 10
 const SINGLE_BAR_CELLS = 40
 const ACCENT = '#f0a24a'
+// Prefer Aria Neural (edge-tts) for en-US: natural-sounding Microsoft neural voice.
+// Falls back to the system default for any other language.
+// Install: pip install edge-tts  (no API key needed)
+const DEFAULT_EN_US_VOICE = 'edge-tts:en-US-AriaNeural'
 
 // Playback advances on a clock tick, which also moves the current segment's fill; the
 // pause between one frame's line and the next frame is counted in ticks.
@@ -135,8 +139,10 @@ type ClipStats = {
 type PlaybackFrame = {
   path: string
   narration: string
-  /** The spoken line as WAV bytes, base64; absent where `say` could not speak it. */
+  /** The spoken line as audio bytes, base64; absent where the voice could not speak it. */
   speech?: string
+  /** MIME type of the speech audio; defaults to 'audio/wav' for `say`, 'audio/mpeg' for edge-tts. */
+  speechMime?: string
   clip?: { paths: string[]; fps: number; stats: ClipStats }
   /** How long the frame plays: its spoken line, or its clip where that runs longer. */
   durationMs: number
@@ -162,6 +168,8 @@ type Playback = {
   isEnded: boolean
   /** The pane is not drawn yet: the terminal is too narrow for a pane nobody asked for. */
   isAwaitingOpen: boolean
+  /** Playback is manually paused; clock advances are skipped. */
+  isPaused: boolean
   /** Aborted when the pane closes: stops the line being spoken. */
   stop: AbortController
 }
@@ -207,14 +215,35 @@ const defaultVoice = async ($: EngineInterface, language: string) => {
   return name || undefined
 }
 
+/** True when the voice string names an edge-tts neural voice (prefixed with "edge-tts:"). */
+const isEdgeTts = (voice: string) => voice.startsWith('edge-tts:')
+/** The bare edge-tts voice name, e.g. "en-US-AriaNeural". */
+const edgeTtsVoice = (voice: string) => voice.slice('edge-tts:'.length)
+
+/**
+ * Render a narration line to an audio file and return its bytes as base64.
+ * Uses edge-tts for voices prefixed with "edge-tts:" (outputs MP3, requires
+ * `pip install edge-tts`), and macOS `say` for all others (outputs WAV).
+ */
 const speakToFile = async ($: EngineInterface, voice: string, text: string, base: string) => {
   await $.fs.write(`${base}.txt`, text)
+  if (isEdgeTts(voice)) {
+    const ran = await $.process
+      .run(
+        ['edge-tts', '--voice', edgeTtsVoice(voice), '--file', `${base}.txt`, '--write-media', `${base}.mp3`],
+        { timeoutMs: RENDER_TIMEOUT_MS },
+      )
+      .catch(() => undefined)
+    if (ran?.exitCode !== 0) return undefined
+    const read = await $.fs.read(`${base}.mp3`, { as: 'bytes' }).catch(() => undefined)
+    return read ? { base64: read.base64, mime: 'audio/mpeg' } : undefined
+  }
   const ran = await $.process
     .run(['say', '-v', voice, '-f', `${base}.txt`, '-o', `${base}.wav`, `--data-format=${SPEECH_FORMAT}`], { timeoutMs: RENDER_TIMEOUT_MS })
     .catch(() => undefined)
   if (ran?.exitCode !== 0) return undefined
   const read = await $.fs.read(`${base}.wav`, { as: 'bytes' }).catch(() => undefined)
-  return read?.base64
+  return read ? { base64: read.base64, mime: 'audio/wav' } : undefined
 }
 
 const render = async (
@@ -310,6 +339,25 @@ const rewind = (current: Playback) => {
   current.waitTicks = 0
   current.progress = 0
   current.isEnded = false
+  current.isPaused = false
+}
+
+/** Jump to a specific frame index; clock picks up and plays it on the next tick. */
+const jumpToFrame = (current: Playback, targetIndex: number) => {
+  const clamped = Math.max(0, Math.min(targetIndex, current.frames.length - 1))
+  const frame = current.frames[clamped]
+  if (!frame) return
+  current.stop.abort()
+  current.stop = new AbortController()
+  current.isSpeaking = false
+  current.isMoving = false
+  current.waitTicks = 0
+  current.isPaused = false
+  current.isEnded = false
+  current.shown = frame.clip?.paths[0] ?? frame.path
+  // Set one before so the clock advances to clamped and starts speech
+  current.index = clamped - 1
+  current.progress = 0
 }
 
 // The clock that moves playback on: a tick does nothing unless slides play, and
@@ -342,6 +390,7 @@ const ensureClock = async ($: EngineInterface) => {
         }
       }
       if (current.isSpeaking || current.isMoving) return
+      if (current.isPaused) return
       if (current.waitTicks > 0) {
         current.waitTicks -= 1
         return
@@ -363,7 +412,7 @@ const ensureClock = async ($: EngineInterface) => {
 
       if (frame.speech) {
         current.isSpeaking = true
-        void $.audio.play({ base64: frame.speech, mime: 'audio/wav' }, { signal: current.stop.signal }).then(
+        void $.audio.play({ base64: frame.speech, mime: frame.speechMime ?? 'audio/wav' }, { signal: current.stop.signal }).then(
           () => {
             current.isSpeaking = false
             current.waitTicks = ticks(GAP_MS)
@@ -423,7 +472,7 @@ export const register: Register = on => {
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = e as unknown as ExplainInput & { tool_use_id: string }
     if (!input.frames?.length) return { deny: 'Give at least one frame.' }
-    const voice = input.voice ?? (await defaultVoice($, input.language))
+    const voice = input.voice ?? (input.language === 'en-US' ? DEFAULT_EN_US_VOICE : undefined) ?? (await defaultVoice($, input.language))
     if (!voice) return { deny: `macOS has no voice for ${input.language}. Give another language tag, or a voice by name.` }
     const browser = await findChrome($)
     if (!browser) return { deny: 'No Chrome or Chromium found to render the frames.' }
@@ -477,8 +526,12 @@ export const register: Register = on => {
     const failed = failures.findIndex(failure => failure !== undefined)
     if (failed !== -1) return { deny: `Chrome could not render frame ${renders[failed]!.frame}: ${failures[failed]}` }
     frames.forEach((frame, i) => {
-      frame.speech = speech[i]
-      const lineMs = frame.speech ? speechMs(frame.speech) : readingTimeMs(frame.narration)
+      const spoken = speech[i]
+      frame.speech = spoken?.base64
+      frame.speechMime = spoken?.mime
+      const lineMs = frame.speech && frame.speechMime === 'audio/wav'
+        ? speechMs(frame.speech)
+        : readingTimeMs(frame.narration)
       frame.durationMs = Math.max(lineMs, frame.clip ? (frame.clip.paths.length / frame.clip.fps) * 1000 : 0)
       if (frame.clip) frame.clip.stats.captureMs = renderMs
     })
@@ -497,6 +550,7 @@ export const register: Register = on => {
       progress: 0,
       isEnded: false,
       isAwaitingOpen: false,
+      isPaused: false,
       stop: new AbortController(),
     }
     // A pane opened from a tool call is one nobody asked for, which a narrow terminal
@@ -547,8 +601,9 @@ export const register: Register = on => {
 
   // Frames are pictures, which only the terminal draws; elsewhere the pane
   // carries the spoken line alone. In the terminal: the picture centred, the line as a
-  // subtitle under it, a progress segment per frame (the current one filling as it
-  // plays), and once the last frame has played, Replay and Close.
+  // subtitle under it (with a speaker indicator while audio plays), a Pause/Play button,
+  // frame-jump buttons, a progress segment per frame, and once the last frame has played,
+  // Replay and Close.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const current = playback
     const index = current ? Math.min(Math.max(current.index, 0), current.frames.length - 1) : 0
@@ -596,17 +651,55 @@ export const register: Register = on => {
       )
     })
 
+    const togglePause = () => {
+      if (playback !== current) return
+      if (current.isPaused) {
+        // Resume: restart current frame from beginning
+        current.isPaused = false
+        current.index = Math.max(-1, index - 1)
+        current.waitTicks = 0
+        $.ui.invalidate('ui.render')
+        void ensureClock($)
+      } else {
+        // Pause: stop audio, freeze
+        current.isPaused = true
+        current.stop.abort()
+        current.stop = new AbortController()
+        current.isSpeaking = false
+        $.ui.invalidate('ui.render')
+      }
+    }
+
     return (
       <Box flexDirection="column" alignItems="center" paddingTop={1}>
         <Image key="frame" source={{ file: current.shown, format: 'png' }} columns={columns} rows={rows} alt={frame.narration} />
         {!current.isEnded && (
-          <Box marginTop={1} width={columns} justifyContent="center">
-            <Text>{frame.narration}</Text>
+          <Box marginTop={1} width={columns} justifyContent="space-between">
+            <Text>{current.isSpeaking ? '🔊 ' : ''}{frame.narration}</Text>
+            <Button hotkey="p" onPress={togglePause}>{current.isPaused ? '▶ Play' : '⏸ Pause'}</Button>
           </Box>
         )}
         <Box marginTop={1} gap={1}>
           {segments}
         </Box>
+        {!current.isEnded && (
+          <Box marginTop={1} gap={1}>
+            {current.frames.map((_, i) => (
+              <Button
+                key={String(i)}
+                variant={i === index ? 'primary' : undefined}
+                onPress={() => {
+                  if (playback !== current) return
+                  jumpToFrame(current, i)
+                  $.ui.invalidate('ui.render')
+                  void ensureClock($)
+                }}
+              >
+                {String(i + 1)}
+              </Button>
+            ))}
+          </Box>
+        )}
         {current.isEnded && (
           <Box marginTop={1} gap={2}>
             <Button
