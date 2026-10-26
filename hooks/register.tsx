@@ -25,9 +25,10 @@ const RENDER_CONCURRENCY = 4
 const CELL_ASPECT = 2
 // The pane's layout: the picture centred with this many columns free on each side, and
 // under it, rows for a blank, the spoken line (up to three rows), a blank, the progress
-// segments, a blank and the end card's buttons.
+// segments, a blank and the controls: Pause and a button per frame while it plays (two
+// rows where a narrow pane wraps them), Replay and Close once it has ended.
 const PICTURE_MARGIN_COLUMNS = 2
-const ROWS_UNDER_PICTURE = 9
+const ROWS_UNDER_PICTURE = 10
 // One progress segment per frame, at most this many cells long; a single frame gets one
 // longer bar, which reads as the clip's own progress.
 const SEGMENT_MAX_CELLS = 10
@@ -176,6 +177,8 @@ type Playback = {
   isEnded: boolean
   /** The pane is not drawn yet: the terminal is too narrow for a pane nobody asked for. */
   isAwaitingOpen: boolean
+  /** Playback is manually paused; clock advances are skipped. */
+  isPaused: boolean
   /** Aborted when the pane closes: stops the line being spoken. */
   stop: AbortController
 }
@@ -324,6 +327,103 @@ const rewind = (current: Playback) => {
   current.waitTicks = 0
   current.progress = 0
   current.isEnded = false
+  current.isPaused = false
+}
+
+/** Freezes playback on the frame shown: the line stops, the clip holds its picture. */
+const pause = (current: Playback) => {
+  current.stop.abort()
+  current.stop = new AbortController()
+  current.isSpeaking = false
+  current.isMoving = false
+  current.isPaused = true
+}
+
+/**
+ * Puts frame `index` on screen and starts its line and its clip; the clock moves on
+ * once both have ended. Nothing in it waits, so no tick can come between.
+ */
+const startFrame = ($: EngineInterface, current: Playback, index: number, now: number) => {
+  const frame = current.frames[index]
+  if (!frame) return
+  current.index = index
+  current.shown = frame.clip?.paths[0] ?? frame.path
+  current.frameStartedAt = now
+  current.progress = 0
+  $.ui.invalidate('ui.render')
+
+  // A pause, a jump or a replay aborts this frame's signal and sets playback up
+  // itself: the line and the clip they cut short then leave it alone, however late
+  // they answer.
+  const stopped = current.stop.signal
+  if (frame.speech) {
+    current.isSpeaking = true
+    void $.audio.play({ base64: frame.speech, mime: 'audio/wav' }, { signal: stopped }).then(
+      () => {
+        if (stopped.aborted) return
+        current.isSpeaking = false
+        current.waitTicks = ticks(GAP_MS)
+      },
+      () => {
+        if (stopped.aborted) return
+        current.isSpeaking = false
+        current.waitTicks = ticks(readingTimeMs(frame.narration))
+      },
+    )
+  } else {
+    current.waitTicks = ticks(readingTimeMs(frame.narration))
+  }
+
+  const clip = frame.clip
+  if (!clip) return
+  current.isMoving = true
+  clip.stats.startedAt = now
+  let picture = 1
+  const timer = $.clock.every(Math.round(1000 / clip.fps), async () => {
+    if (playback !== current || current.index !== index || stopped.aborted) {
+      timer.cancel()
+      return
+    }
+    if (picture >= clip.paths.length) {
+      timer.cancel()
+      current.isMoving = false
+      const stats = clip.stats
+      stats.endedAt = await $.clock.now()
+      const seconds = (stats.endedAt - (stats.startedAt ?? stats.endedAt)) / 1000
+      stats.achievedFps = seconds > 0 ? Math.round((stats.taken / seconds) * 10) / 10 : undefined
+      await $.fs.write(`${current.dir}/clip-${stats.frame}-stats.json`, JSON.stringify(stats, null, 2))
+      return
+    }
+    const path = clip.paths[picture++]!
+    current.shown = path
+    clip.stats.sent += 1
+    void $.ui.blit({ requestId: PANE, key: 'frame', source: { file: path, format: 'png' } }).then(answer => {
+      if (answer.deny) {
+        clip.stats.denied += 1
+        clip.stats.firstDenial ??= answer.deny
+      } else {
+        clip.stats.taken += 1
+      }
+    })
+  })
+}
+
+/**
+ * Cuts short what plays and plays frame `target` from its start, on screen at once. The
+ * time is read first: from there to the frame starting nothing waits, so a tick cannot
+ * move playback on in between.
+ */
+const jumpToFrame = async ($: EngineInterface, current: Playback, target: number) => {
+  const now = await $.clock.now()
+  if (playback !== current) return
+  current.stop.abort()
+  current.stop = new AbortController()
+  current.isSpeaking = false
+  current.isMoving = false
+  current.waitTicks = 0
+  current.isPaused = false
+  current.isEnded = false
+  startFrame($, current, Math.max(0, Math.min(target, current.frames.length - 1)), now)
 }
 
 // The clock that moves playback on: a tick does nothing unless slides play, and
@@ -345,7 +445,7 @@ const ensureClock = async ($: EngineInterface) => {
       const now = await $.clock.now()
       lastTickAt = now
       const current = playback
-      if (!current || current.isAwaitingOpen || current.isEnded) return
+      if (!current || current.isAwaitingOpen || current.isEnded || current.isPaused) return
       if (playback !== current) return
       const playing = current.frames[current.index]
       if (playing) {
@@ -367,62 +467,7 @@ const ensureClock = async ($: EngineInterface) => {
         $.ui.invalidate('ui.render')
         return
       }
-      const frame = current.frames[index]
-      if (!frame) return
-      current.index = index
-      current.shown = frame.clip?.paths[0] ?? frame.path
-      current.frameStartedAt = now
-      current.progress = 0
-      $.ui.invalidate('ui.render')
-
-      if (frame.speech) {
-        current.isSpeaking = true
-        void $.audio.play({ base64: frame.speech, mime: 'audio/wav' }, { signal: current.stop.signal }).then(
-          () => {
-            current.isSpeaking = false
-            current.waitTicks = ticks(GAP_MS)
-          },
-          () => {
-            current.isSpeaking = false
-            current.waitTicks = ticks(readingTimeMs(frame.narration))
-          },
-        )
-      } else {
-        current.waitTicks = ticks(readingTimeMs(frame.narration))
-      }
-
-      const clip = frame.clip
-      if (!clip) return
-      current.isMoving = true
-      clip.stats.startedAt = await $.clock.now()
-      let picture = 1
-      const timer = $.clock.every(Math.round(1000 / clip.fps), async () => {
-        if (playback !== current || current.index !== index) {
-          timer.cancel()
-          return
-        }
-        if (picture >= clip.paths.length) {
-          timer.cancel()
-          current.isMoving = false
-          const stats = clip.stats
-          stats.endedAt = await $.clock.now()
-          const seconds = (stats.endedAt - (stats.startedAt ?? stats.endedAt)) / 1000
-          stats.achievedFps = seconds > 0 ? Math.round((stats.taken / seconds) * 10) / 10 : undefined
-          await $.fs.write(`${current.dir}/clip-${stats.frame}-stats.json`, JSON.stringify(stats, null, 2))
-          return
-        }
-        const path = clip.paths[picture++]!
-        current.shown = path
-        clip.stats.sent += 1
-        void $.ui.blit({ requestId: PANE, key: 'frame', source: { file: path, format: 'png' } }).then(answer => {
-          if (answer.deny) {
-            clip.stats.denied += 1
-            clip.stats.firstDenial ??= answer.deny
-          } else {
-            clip.stats.taken += 1
-          }
-        })
-      })
+      startFrame($, current, index, now)
   })
 }
 
@@ -511,6 +556,7 @@ export const register: Register = on => {
       progress: 0,
       isEnded: false,
       isAwaitingOpen: false,
+      isPaused: false,
       stop: new AbortController(),
     }
     // A pane opened from a tool call is one nobody asked for, which a narrow terminal
@@ -561,8 +607,9 @@ export const register: Register = on => {
 
   // Frames are pictures, which only the terminal draws; elsewhere the pane
   // carries the spoken line alone. In the terminal: the picture centred, the line as a
-  // subtitle under it, a progress segment per frame (the current one filling as it
-  // plays), and once the last frame has played, Replay and Close.
+  // subtitle under it (with a speaker while the line is heard), a progress segment per
+  // frame (the current one filling as it plays), Pause and a button per frame to jump
+  // to, and once the last frame has played, Replay and Close.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const current = playback
     const index = current ? Math.min(Math.max(current.index, 0), current.frames.length - 1) : 0
@@ -610,17 +657,52 @@ export const register: Register = on => {
       )
     })
 
+    // Playing again replays the paused frame from its start, so its line is heard whole.
+    const play = (target: number) => {
+      if (playback !== current) return
+      void jumpToFrame($, current, target).then(() => ensureClock($))
+    }
+    const togglePause = () => {
+      if (playback !== current) return
+      if (current.isPaused) return play(index)
+      pause(current)
+      $.ui.invalidate('ui.render')
+    }
+
+    // The speaker has a slot of its own, so the line does not move as it comes and goes.
+    // The labels are plain words: the glyphs for play and pause are drawn one cell wide
+    // by some terminals and two by others, which breaks the row they sit in.
     return (
       <Box flexDirection="column" alignItems="center" paddingTop={1}>
         <Image key="frame" source={{ file: current.shown, format: 'png' }} columns={columns} rows={rows} alt={frame.narration} />
         {!current.isEnded && (
-          <Box marginTop={1} width={columns} justifyContent="center">
+          <Box marginTop={1} width={columns} justifyContent="center" gap={1}>
+            <Box width={2} flexShrink={0}>
+              <Text>{current.isSpeaking ? '🔊' : ''}</Text>
+            </Box>
             <Text>{frame.narration}</Text>
           </Box>
         )}
         <Box marginTop={1} gap={1}>
           {segments}
         </Box>
+        {!current.isEnded && (
+          <Box marginTop={1} width={columns} justifyContent="center" flexWrap="wrap" gap={1}>
+            <Button key="pause" hotkey="p" onPress={togglePause}>
+              {current.isPaused ? 'Play' : 'Pause'}
+            </Button>
+            {current.frames.map((_, i) => (
+              <Button
+                key={`frame-${i + 1}`}
+                hotkey={i < 9 ? String(i + 1) : undefined}
+                variant={i === index ? 'primary' : undefined}
+                onPress={() => play(i)}
+              >
+                {String(i + 1)}
+              </Button>
+            ))}
+          </Box>
+        )}
         {current.isEnded && (
           <Box marginTop={1} gap={2}>
             <Button

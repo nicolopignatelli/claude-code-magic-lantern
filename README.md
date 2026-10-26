@@ -63,9 +63,16 @@ The pane opens beside the conversation. Each frame is shown centred, with its li
 subtitle underneath and one progress segment per frame; the current segment fills as its
 line is spoken. A single moving frame gets one longer bar instead, like a video's.
 
+While it plays, a speaker beside the line shows when the voice is speaking, and under the
+progress sit **Pause** and a button per frame. Pause stops the voice and the motion where
+they are; **Play** then replays that frame from its start, so its line is heard whole. A
+frame's button jumps to it and plays it.
+
 After the last frame the pane stays open on it, with **Replay** and **Close**. Closing the
-pane, with the button, `esc` or its ×, stops the voice at once. The buttons' hotkeys (`r`
-for Replay) work once the pane has the keyboard: click it, or press ctrl+x then tab.
+pane, with the button, `esc` or its ×, stops the voice at once. The buttons' hotkeys (`p`
+for Pause and Play, `1` to `9` for the frames, `r` for Replay) work once the pane has the
+keyboard: click it, or press ctrl+x then tab. The controls are drawn in the terminal; in
+the desktop app and the IDEs the pane shows the spoken line alone.
 
 Claude Code opens a pane nobody asked for only in a terminal at least 144 columns wide. In a
 narrower one the slides wait, and Claude asks you to run **`/magic-lantern`**, which opens
