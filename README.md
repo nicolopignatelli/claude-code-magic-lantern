@@ -114,6 +114,7 @@ git clone https://github.com/nicolopignatelli/claude-code-magic-lantern
 cd claude-code-magic-lantern
 claude --plugin-dir .          # a session with the mod loaded from this folder; edits reload it
 claude plugin validate .       # what Claude Code reads from the manifest, hooks and marketplace
+claude plugin test .           # the playback tests, against a mocked clock, voice and pane
 ```
 
 Once a session has loaded the mod, Claude Code writes its type declarations to
@@ -123,6 +124,7 @@ Once a session has loaded the mod, Claude Code writes its type declarations to
 |---|---|
 | `hooks/register.tsx` | Registers the `project` tool and `/magic-lantern`, renders frames with Chrome, speaks the lines, plays them in the pane |
 | `skills/magic-lantern/SKILL.md` | When a projection is worth it, and when it is not |
+| `tests/playback.test.ts` | The voice, pause and play, jumps, hotkeys and the layout in a narrow pane, with processes, audio and the clock mocked |
 
 ## License
 
