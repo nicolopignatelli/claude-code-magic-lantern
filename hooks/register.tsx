@@ -65,9 +65,11 @@ const DEFAULT_VOICE_SCRIPT = `function run(argv) {
 // Narration is spoken to a WAV file ahead of playback, so a line can be
 // stopped mid-sentence when the pane closes.
 const SPEECH_FORMAT = 'LEI16@22050'
-// That format's bytes a second (16-bit mono at 22050 Hz), and its WAV header.
+// That format's bytes a second (16-bit mono at 22050 Hz), and the WAV header `say`
+// writes: not the bare 44 bytes, but padded so the samples start at 4 KiB, whatever
+// the voice or the length of the line.
 const SPEECH_BYTES_PER_SECOND = 44_100
-const WAV_HEADER_BYTES = 44
+const WAV_HEADER_BYTES = 4096
 
 // Appended to a motion frame's page: it pauses every animation at the moment
 // the URL's fragment names, in milliseconds (`#t=480`).
