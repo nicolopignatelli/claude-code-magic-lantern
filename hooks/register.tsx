@@ -41,14 +41,26 @@ const GAP_MS = 400
 // Where a line cannot play, a frame stays as long as the line takes to read.
 const WORDS_PER_SECOND = 2.5
 
-// The voice that reads a narration is macOS's default voice for its language,
+// The voice that reads a narration is the best one macOS has for its language,
 // which the speech framework knows and `say` does not: left to itself, `say`
-// speaks every language in the one system voice. The language arrives as an
-// argument, never inside the script.
+// speaks every language in the one system voice. A Premium or Enhanced voice the
+// person downloaded wins over the language's default, which is a compact one even
+// then; among voices of one quality the default stays, so a Mac with compact voices
+// only never speaks in a novelty voice. The voice goes to `say` by its identifier:
+// names repeat across languages, and `say` speaks a name it does not know in another
+// voice without failing. The language arrives as an argument, never inside the script.
 const DEFAULT_VOICE_SCRIPT = `function run(argv) {
   ObjC.import('AVFoundation')
-  const voice = $.AVSpeechSynthesisVoice.voiceWithLanguage(argv[0])
-  return voice.isNil() ? '' : voice.name.js
+  const language = argv[0].toLowerCase()
+  const fallback = $.AVSpeechSynthesisVoice.voiceWithLanguage(argv[0])
+  let best = fallback.isNil() ? undefined : fallback
+  const voices = $.AVSpeechSynthesisVoice.speechVoices
+  for (let i = 0; i < voices.count; i++) {
+    const voice = voices.objectAtIndex(i)
+    if (voice.language.js.toLowerCase() !== language) continue
+    if (!best || voice.quality > best.quality) best = voice
+  }
+  return best ? best.identifier.js : ''
 }`
 // Narration is spoken to a WAV file ahead of playback, so a line can be
 // stopped mid-sentence when the pane closes.

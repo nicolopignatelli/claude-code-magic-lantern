@@ -46,8 +46,12 @@ claude plugin install magic-lantern --marketplace nicolopignatelli/claude-code-m
 
 **What it needs:**
 
-- **macOS**, for the voice: narration is spoken with the system's own voices (`say`), in
-  the default voice macOS keeps for the narration's language.
+- **macOS**, for the voice: narration is spoken with the system's own voices (`say`), on
+  your Mac, in the best voice installed for the narration's language. The voices a Mac
+  ships with are compact ones; for a far more natural narration, download a Premium voice
+  for your language in System Settings → Accessibility → Read & Speak → System Voice ⓘ →
+  Manage Voices (Ava or Zoe for American English). It is picked up from the next
+  projection, without being made the system voice.
 - **Google Chrome or Chromium**, to render the frames Claude composes.
 - **ffmpeg**, for moving frames only (`brew install ffmpeg`). Still frames work without it.
 - **A terminal that draws pictures** with the kitty graphics protocol: kitty or Ghostty.
