@@ -123,7 +123,7 @@ Once a session has loaded the mod, Claude Code writes its type declarations to
 | File | What it does |
 |---|---|
 | `hooks/register.tsx` | Registers the `project` tool and `/magic-lantern`, renders frames with Chrome, speaks the lines, plays them in the pane |
-| `skills/magic-lantern/SKILL.md` | When a projection is worth it, and when it is not |
+| `skills/projecting/SKILL.md` | When a projection is worth it, and when it is not |
 | `tests/playback.test.ts` | The voice, pause and play, jumps, hotkeys and the layout in a narrow pane, with processes, audio and the clock mocked |
 
 ## License

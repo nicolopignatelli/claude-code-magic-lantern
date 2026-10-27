@@ -1,5 +1,5 @@
 ---
-name: magic-lantern
+name: projecting
 description: Project a short narrated slideshow in a pane beside the conversation - frames shown in order, a voice speaking over each, some of them moving. Use it when you have to show the person what changed in something they look at, walk them through how something moves through a process, explain why something happened when the reason is a chain of steps, bring them back up to speed on work they have been away from, introduce them to an area of the work they have not been in, recap what a long working session changed, show something that only makes sense in motion, present the findings of an investigation they handed off, or compare how something is done here with how others do it.
 ---
 

@@ -86,7 +86,7 @@ const CHROME_PATHS = [
 const CHROME_COMMANDS = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']
 const FFMPEG_COMMANDS = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg']
 
-const DESCRIPTION = `Project a short narrated slideshow in a pane beside the conversation: a few frames you compose as HTML, shown in order, each with one line a voice speaks while it is on screen. Load the magic-lantern skill first: it says when a projection fits.
+const DESCRIPTION = `Project a short narrated slideshow in a pane beside the conversation: a few frames you compose as HTML, shown in order, each with one line a voice speaks while it is on screen. Load the magic-lantern:projecting skill first: it says when a projection fits.
 
 Each frame is a whole HTML document drawn at width x height CSS pixels (default 1280x720): one idea per frame, large type, few words on screen, since the narration carries the sentence. Keep each narration line to one or two spoken sentences. 3 to 8 frames.
 
